@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/user"
 	"path"
 	"regexp"
 	"sync"
-	"time"
 
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
@@ -46,6 +46,10 @@ func main() {
 			Name:  "timestamps, t",
 			Usage: "print timestamps",
 		},
+		cli.Int64Flag{
+			Name:  "since, s",
+			Usage: "since X seconds ago",
+		},
 	}
 	app.Action = tailAction
 
@@ -57,6 +61,7 @@ type Config struct {
 	PodQuery       *regexp.Regexp
 	Timestamps     bool
 	ContainerQuery *regexp.Regexp
+	Since          int64
 }
 
 var tailAction = func(c *cli.Context) error {
@@ -66,18 +71,13 @@ var tailAction = func(c *cli.Context) error {
 		os.Exit(1)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	err = run(ctx, config)
 	if err != nil {
-		log.Println(err)
+		fmt.Println(err)
 		os.Exit(2)
 	}
-
-	go func() {
-		time.Sleep(time.Second)
-		cancel()
-	}()
 
 	return nil
 }
@@ -113,6 +113,7 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		PodQuery:       pod,
 		ContainerQuery: container,
 		Timestamps:     c.Bool("timestamps"),
+		Since:          c.Int64("since"),
 	}, nil
 }
 
@@ -140,61 +141,76 @@ func run(ctx context.Context, config *Config) error {
 
 	var wg sync.WaitGroup
 
-	colors := []color.Attribute{
-		color.FgHiRed,
-		color.FgHiGreen,
-		color.FgHiYellow,
-		color.FgHiBlue,
-		color.FgHiMagenta,
-		color.FgHiCyan,
-		color.FgHiWhite,
+	colorList := [][2]*color.Color{
+		{color.New(color.FgHiCyan), color.New(color.FgCyan)},
+		{color.New(color.FgHiGreen), color.New(color.FgGreen)},
+		{color.New(color.FgHiMagenta), color.New(color.FgMagenta)},
+		{color.New(color.FgHiYellow), color.New(color.FgYellow)},
+		{color.New(color.FgHiBlue), color.New(color.FgBlue)},
+		{color.New(color.FgHiRed), color.New(color.FgRed)},
 	}
 
 	counter := 0
 	for _, pod := range res.Items {
 		if config.PodQuery.MatchString(pod.Name) {
-			wg.Add(1)
 			index := counter
 			counter++
 			pod := pod
 
-			podLog := color.New(colors[index])
-			fmt.Printf("Tailing ")
+			colorIndex := index % len(colorList)
+			podLog := colorList[colorIndex][0]
+			containerLog := colorList[colorIndex][1]
 			podLog.Println(pod.Name)
 
-			go func() {
-				since := int64(10)
-				req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
-					Follow:       true,
-					Timestamps:   config.Timestamps,
-					Container:    "",
-					SinceSeconds: &since,
-				})
+			// check containers
+			for _, container := range pod.Spec.Containers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
 
-				readCloser, err := req.Stream()
-				if err != nil {
-					log.Panic(errors.Wrap(err, "could not open stream"))
-				}
-				defer readCloser.Close()
+					req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
+						Follow:       true,
+						Timestamps:   config.Timestamps,
+						Container:    container.Name,
+						SinceSeconds: &config.Since,
+					})
 
-				stream, err := req.Stream()
-				if err != nil {
-					log.Printf("Error opening stream to %s: %s\n", pod.Name, err.Error())
-				}
-
-				reader := bufio.NewReader(stream)
-
-				for {
-					line, err := reader.ReadBytes('\n')
+					readCloser, err := req.Stream()
 					if err != nil {
-						log.Printf("ERROR: %s\n", err.Error())
+						fmt.Println(errors.Wrap(err, "could not open stream"))
+					}
+					defer readCloser.Close()
+
+					stream, err := req.Stream()
+					if err != nil {
+						log.Printf("Error opening stream to %s: %s\n", pod.Name, err.Error())
+						continue
 					}
 
-					podLog.Printf("%32s ", pod.Name)
+					reader := bufio.NewReader(stream)
 
-					fmt.Printf("%s", line)
-				}
-			}()
+					for {
+						podLog.Printf("%-32s ", pod.Name)
+						if container.Name != "" {
+							containerLog.Printf("%-12s ", container.Name)
+						}
+
+						line, err := reader.ReadBytes('\n')
+						if err != nil {
+							// EOF -> pod exited
+							if err == io.EOF {
+								color.Red("terminated")
+								return
+							}
+
+							fmt.Println(err)
+							return
+						}
+
+						fmt.Printf("%s", line)
+					}
+				}()
+			}
 		}
 	}
 
@@ -204,8 +220,8 @@ func run(ctx context.Context, config *Config) error {
 
 	wg.Wait()
 
+	// monitor for pods added/removed
 	// watch, err := pods.Watch(api.ListOptions{})
-
 	// go func() {
 	// 	for {
 	// 		select {
