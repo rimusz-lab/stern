@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
 
 	cli "gopkg.in/urfave/cli.v1"
@@ -131,7 +132,7 @@ func run(ctx context.Context, config *Config) error {
 	var pods v1.PodInterface // this fixes autocomplete
 	pods = clientset.Core().Pods("")
 
-	log.Println("Getting pods..")
+	fmt.Println("Getting pods..")
 	res, err := pods.List(api.ListOptions{})
 	if err != nil {
 		return errors.Wrap(err, "failed to list pods")
@@ -139,20 +140,35 @@ func run(ctx context.Context, config *Config) error {
 
 	var wg sync.WaitGroup
 
-	match := false
+	colors := []color.Attribute{
+		color.FgHiRed,
+		color.FgHiGreen,
+		color.FgHiYellow,
+		color.FgHiBlue,
+		color.FgHiMagenta,
+		color.FgHiCyan,
+		color.FgHiWhite,
+	}
+
+	counter := 0
 	for _, pod := range res.Items {
 		if config.PodQuery.MatchString(pod.Name) {
-			log.Printf("tailing %s", pod.Name)
 			wg.Add(1)
-			match = true
+			index := counter
+			counter++
 			pod := pod
 
+			podLog := color.New(colors[index])
+			fmt.Printf("Tailing ")
+			podLog.Println(pod.Name)
+
 			go func() {
+				since := int64(10)
 				req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
-					Follow:     true,
-					Timestamps: config.Timestamps,
-					Container:  "",
-					SinceTime:  time.Now(),
+					Follow:       true,
+					Timestamps:   config.Timestamps,
+					Container:    "",
+					SinceSeconds: &since,
 				})
 
 				readCloser, err := req.Stream()
@@ -174,14 +190,16 @@ func run(ctx context.Context, config *Config) error {
 						log.Printf("ERROR: %s\n", err.Error())
 					}
 
-					fmt.Printf("%32s | %s", pod.Name, line)
+					podLog.Printf("%32s ", pod.Name)
+
+					fmt.Printf("%s", line)
 				}
 			}()
 		}
 	}
 
-	if !match {
-		log.Println("No matches")
+	if counter == 0 {
+		fmt.Println("No matches")
 	}
 
 	wg.Wait()
