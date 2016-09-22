@@ -41,6 +41,10 @@ func main() {
 			Usage: "container name when multiple containers in pod",
 			Value: ".*",
 		},
+		cli.BoolFlag{
+			Name:  "timestamps, t",
+			Usage: "print timestamps",
+		},
 	}
 	app.Action = tailAction
 
@@ -50,6 +54,7 @@ func main() {
 type Config struct {
 	KubeConfig     string
 	PodQuery       *regexp.Regexp
+	Timestamps     bool
 	ContainerQuery *regexp.Regexp
 }
 
@@ -106,6 +111,7 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		KubeConfig:     kubeConfig,
 		PodQuery:       pod,
 		ContainerQuery: container,
+		Timestamps:     c.Bool("timestamps"),
 	}, nil
 }
 
@@ -144,8 +150,9 @@ func run(ctx context.Context, config *Config) error {
 			go func() {
 				req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
 					Follow:     true,
-					Timestamps: true,
+					Timestamps: config.Timestamps,
 					Container:  "",
+					SinceTime:  time.Now(),
 				})
 
 				readCloser, err := req.Stream()
