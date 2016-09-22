@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"regexp"
 	"time"
 
 	"github.com/pkg/errors"
@@ -23,11 +24,17 @@ func main() {
 
 	app.Name = "stern"
 	app.Usage = "Tail multiple pods and containers from Kubernetes"
+	app.UsageText = "stern [options] query"
 	app.Version = "1.0.0"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "kube-config",
 			Value: "",
+		},
+		cli.StringFlag{
+			Name:  "container, c",
+			Usage: "container name when multiple containers in pod",
+			Value: ".*",
 		},
 	}
 	app.Action = tailAction
@@ -36,7 +43,9 @@ func main() {
 }
 
 type Config struct {
-	KubeConfig string
+	KubeConfig     string
+	PodQuery       *regexp.Regexp
+	ContainerQuery *regexp.Regexp
 }
 
 var tailAction = func(c *cli.Context) error {
@@ -69,8 +78,24 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		kubeConfig = path.Join(u.HomeDir, ".kube/config")
 	}
 
+	if len(c.Args()) < 1 {
+		return nil, errors.New("query missing")
+	}
+
+	pod, err := regexp.Compile(c.Args()[0])
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to compile regular expression from query")
+	}
+
+	container, err := regexp.Compile(c.String("container"))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to compile regular expression for container query")
+	}
+
 	return &Config{
-		KubeConfig: kubeConfig,
+		KubeConfig:     kubeConfig,
+		PodQuery:       pod,
+		ContainerQuery: container,
 	}, nil
 }
 
@@ -85,12 +110,12 @@ func run(ctx context.Context, config *Config) error {
 		return errors.Wrap(err, "failed to create clientset")
 	}
 
-	log.Println("run")
 	for {
-		pods, err := clientset.Core().Pods("").List(api.ListOptions{})
+		pods, err := clientset.Core().Pods("cluster-manager").List(api.ListOptions{})
 		if err != nil {
-			panic(err.Error())
+			return errors.Wrap(err, "failed to get pods")
 		}
+
 		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
 		time.Sleep(10 * time.Second)
 	}
