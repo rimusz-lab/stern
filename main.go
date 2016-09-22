@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os/user"
 	"path"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,8 +17,11 @@ import (
 	cli "gopkg.in/urfave/cli.v1"
 
 	"k8s.io/client-go/1.4/kubernetes"
+	"k8s.io/client-go/1.4/kubernetes/typed/core/v1"
 	"k8s.io/client-go/1.4/pkg/api"
 	"k8s.io/client-go/1.4/tools/clientcmd"
+
+	v1api "k8s.io/client-go/1.4/pkg/api/v1"
 )
 
 func main() {
@@ -55,13 +60,18 @@ var tailAction = func(c *cli.Context) error {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	err = run(ctx, config)
 	if err != nil {
 		log.Println(err)
 		os.Exit(2)
 	}
+
+	go func() {
+		time.Sleep(time.Second)
+		cancel()
+	}()
 
 	return nil
 }
@@ -105,20 +115,82 @@ func run(ctx context.Context, config *Config) error {
 		return errors.Wrap(err, "failed to get kube config")
 	}
 
+	c.Insecure = true
+
 	clientset, err := kubernetes.NewForConfig(c)
 	if err != nil {
 		return errors.Wrap(err, "failed to create clientset")
 	}
 
-	for {
-		pods, err := clientset.Core().Pods("cluster-manager").List(api.ListOptions{})
-		if err != nil {
-			return errors.Wrap(err, "failed to get pods")
-		}
+	var pods v1.PodInterface // this fixes autocomplete
+	pods = clientset.Core().Pods("")
 
-		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
-		time.Sleep(10 * time.Second)
+	log.Println("Getting pods..")
+	res, err := pods.List(api.ListOptions{})
+	if err != nil {
+		return errors.Wrap(err, "failed to list pods")
 	}
+
+	var wg sync.WaitGroup
+
+	match := false
+	for _, pod := range res.Items {
+		if config.PodQuery.MatchString(pod.Name) {
+			log.Printf("tailing %s", pod.Name)
+			wg.Add(1)
+			match = true
+			pod := pod
+
+			go func() {
+				req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
+					Follow:     true,
+					Timestamps: true,
+					Container:  "",
+				})
+
+				readCloser, err := req.Stream()
+				if err != nil {
+					log.Panic(errors.Wrap(err, "could not open stream"))
+				}
+				defer readCloser.Close()
+
+				stream, err := req.Stream()
+				if err != nil {
+					log.Printf("Error opening stream to %s: %s\n", pod.Name, err.Error())
+				}
+
+				reader := bufio.NewReader(stream)
+
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						log.Printf("ERROR: %s\n", err.Error())
+					}
+
+					fmt.Printf("%32s | %s", pod.Name, line)
+				}
+			}()
+		}
+	}
+
+	if !match {
+		log.Println("No matches")
+	}
+
+	wg.Wait()
+
+	// watch, err := pods.Watch(api.ListOptions{})
+
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case e := <-watch.ResultChan():
+	// 			log.Println("EVENT", e)
+	// 		case <-ctx.Done():
+	// 			watch.Stop()
+	// 		}
+	// 	}
+	// }()
 
 	return nil
 }
