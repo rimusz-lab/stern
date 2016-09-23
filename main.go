@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"reflect"
 	"regexp"
 	"sync"
 
@@ -159,6 +160,7 @@ func run(ctx context.Context, config *Config) error {
 	}
 
 	var wg sync.WaitGroup
+	wg.Add(1)
 
 	colorList := [][2]*color.Color{
 		{color.New(color.FgHiCyan), color.New(color.FgCyan)},
@@ -237,20 +239,25 @@ func run(ctx context.Context, config *Config) error {
 		fmt.Println("No matches")
 	}
 
-	wg.Wait()
-
 	// monitor for pods added/removed
-	// watch, err := pods.Watch(api.ListOptions{})
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case e := <-watch.ResultChan():
-	// 			log.Println("EVENT", e)
-	// 		case <-ctx.Done():
-	// 			watch.Stop()
-	// 		}
-	// 	}
-	// }()
+	watch, err := pods.Watch(api.ListOptions{Watch: true})
+	go func() {
+		for {
+			select {
+			case e := <-watch.ResultChan():
+				log.Println("EVENT", e.Type)
+				log.Println(reflect.TypeOf(e.Object))
+				pod, ok := e.Object.(*v1api.Pod)
+				if ok {
+					log.Println("POD", pod.Name)
+				}
+			case <-ctx.Done():
+				watch.Stop()
+			}
+		}
+	}()
+
+	wg.Wait()
 
 	return nil
 }
