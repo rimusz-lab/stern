@@ -124,8 +124,6 @@ func run(ctx context.Context, config *Config) error {
 		return errors.Wrap(err, "failed to get kube config")
 	}
 
-	c.Insecure = true
-
 	clientset, err := kubernetes.NewForConfig(c)
 	if err != nil {
 		return errors.Wrap(err, "failed to create clientset")
@@ -185,7 +183,7 @@ func run(ctx context.Context, config *Config) error {
 					stream, err := req.Stream()
 					if err != nil {
 						log.Printf("Error opening stream to %s: %s\n", pod.Name, err.Error())
-						continue
+						// continue
 					}
 
 					reader := bufio.NewReader(stream)
