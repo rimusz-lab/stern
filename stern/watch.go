@@ -2,7 +2,6 @@ package stern
 
 import (
 	"context"
-	"log"
 	"regexp"
 
 	"github.com/pkg/errors"
@@ -14,8 +13,8 @@ import (
 )
 
 type Target struct {
-	Pod       *v1.Pod
-	Container *v1.Container
+	Pod       string
+	Container string
 }
 
 func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp) (chan *Target, chan *Target, error) {
@@ -42,11 +41,19 @@ func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp)
 
 				switch e.Type {
 				case watch.Added:
-					log.Println("added", pod.Name)
-				// case watch.Deleted:
-				// 	added <- pod
-				case watch.Modified:
-					log.Println("modified", pod.Name, pod.Status.Reason, pod.Status.ContainerStatuses)
+					for _, container := range pod.Spec.Containers {
+						added <- &Target{
+							Pod:       pod.Name,
+							Container: container.Name,
+						}
+					}
+				case watch.Deleted:
+					for _, container := range pod.Spec.Containers {
+						removed <- &Target{
+							Pod:       pod.Name,
+							Container: container.Name,
+						}
+					}
 				}
 			case <-ctx.Done():
 				watcher.Stop()

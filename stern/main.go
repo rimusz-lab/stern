@@ -23,13 +23,13 @@ func Run(ctx context.Context, config *Config) error {
 
 	go func() {
 		for p := range added {
-			log.Println("add", p.Pod.Name, p.Container.Name)
+			log.Println("add", p.Pod, p.Container)
 		}
 	}()
 
 	go func() {
 		for p := range removed {
-			log.Println("remove", p.Pod.Name, p.Container.Name)
+			log.Println("remove", p.Pod, p.Container)
 		}
 	}()
 
