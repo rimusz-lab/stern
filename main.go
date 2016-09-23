@@ -47,6 +47,11 @@ func main() {
 			Usage: "kubernetes context to use",
 			Value: "",
 		},
+		cli.StringFlag{
+			Name:  "namespace",
+			Usage: "kubernetes namespace to use",
+			Value: "default",
+		},
 		cli.BoolFlag{
 			Name:  "timestamps, t",
 			Usage: "print timestamps",
@@ -65,6 +70,7 @@ func main() {
 type Config struct {
 	KubeConfig     string
 	ContextName    string
+	Namespace      string
 	PodQuery       *regexp.Regexp
 	Timestamps     bool
 	ContainerQuery *regexp.Regexp
@@ -122,6 +128,7 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		Timestamps:     c.Bool("timestamps"),
 		Since:          c.Int64("since"),
 		ContextName:    c.String("context"),
+		Namespace:      c.String("namespace"),
 	}, nil
 }
 
@@ -143,7 +150,7 @@ func run(ctx context.Context, config *Config) error {
 	}
 
 	var pods v1.PodInterface // this fixes autocomplete
-	pods = clientset.Core().Pods("")
+	pods = clientset.Core().Pods(config.Namespace)
 
 	fmt.Println("Getting pods..")
 	res, err := pods.List(api.ListOptions{})
@@ -180,7 +187,7 @@ func run(ctx context.Context, config *Config) error {
 				go func() {
 					defer wg.Done()
 
-					req := clientset.Core().Pods("default").GetLogs(pod.Name, &v1api.PodLogOptions{
+					req := clientset.Core().Pods(config.Namespace).GetLogs(pod.Name, &v1api.PodLogOptions{
 						Follow:       true,
 						Timestamps:   config.Timestamps,
 						Container:    container.Name,
