@@ -30,10 +30,7 @@ func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp)
 		for {
 			select {
 			case e := <-watcher.ResultChan():
-				pod, ok := e.Object.(*v1.Pod)
-				if !ok {
-					continue
-				}
+				pod := e.Object.(*v1.Pod)
 
 				if !podFilter.MatchString(pod.Name) {
 					continue
@@ -41,10 +38,21 @@ func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp)
 
 				switch e.Type {
 				case watch.Added:
-					for _, container := range pod.Spec.Containers {
-						added <- &Target{
-							Pod:       pod.Name,
-							Container: container.Name,
+					for _, c := range pod.Status.ContainerStatuses {
+						if c.Ready {
+							added <- &Target{
+								Pod:       pod.Name,
+								Container: c.Name,
+							}
+						}
+					}
+				case watch.Modified:
+					for _, c := range pod.Status.ContainerStatuses {
+						if c.Ready {
+							added <- &Target{
+								Pod:       pod.Name,
+								Container: c.Name,
+							}
 						}
 					}
 				case watch.Deleted:

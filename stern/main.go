@@ -3,8 +3,6 @@ package stern
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
 
 	"github.com/pkg/errors"
 	"github.com/wercker/stern/kubernetes"
@@ -29,11 +27,10 @@ func Run(ctx context.Context, config *Config) error {
 		for p := range added {
 			ID := id(p.Pod, p.Container)
 			if tails[ID] != nil {
-				// this shouldn't happen but in case it does anyway we'll ignore the dupe entry
 				continue
 			}
 
-			log.Printf("addded %s | %s\n", p.Pod, p.Container)
+			fmt.Printf("addded %s | %s\n", p.Pod, p.Container)
 
 			tail := NewTail(p.Pod, p.Container, &TailOptions{
 				Timestamps:   config.Timestamps,
@@ -41,22 +38,19 @@ func Run(ctx context.Context, config *Config) error {
 			})
 			tails[ID] = tail
 
-			done := tail.Start(ctx, input, os.Stdout)
-			
-			go func() {
-				<-done
-				tail.Close()
-				delete(tails[ID])
-			}
+			tail.Start(ctx, input, nil)
 		}
 	}()
 
 	go func() {
 		for p := range removed {
-			log.Printf("removed %s | %s\n", p.Pod, p.Container)
 			ID := id(p.Pod, p.Container)
-			tail := tails[ID]
-			tail.Close()
+			if tails[ID] == nil {
+				continue
+			}
+			fmt.Printf("removed %s | %s\n", p.Pod, p.Container)
+			tails[ID].Close()
+			delete(tails, ID)
 		}
 	}()
 

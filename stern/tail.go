@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 
 	"github.com/pkg/errors"
 
@@ -31,9 +30,7 @@ func NewTail(podName, containerName string, options *TailOptions) *Tail {
 	return &Tail{PodName: podName, ContainerName: containerName, Options: options}
 }
 
-func (t *Tail) Start(ctx context.Context, i corev1.PodInterface, out io.Writer) chan error {
-	errc := make(chan error)
-
+func (t *Tail) Start(ctx context.Context, i corev1.PodInterface, out io.Writer) {
 	go func() {
 		req := i.GetLogs(t.PodName, &v1.PodLogOptions{
 			Follow:       true,
@@ -50,15 +47,18 @@ func (t *Tail) Start(ctx context.Context, i corev1.PodInterface, out io.Writer) 
 
 		stream, err := req.Stream()
 		if err != nil {
-			errc <- errors.Wrapf(err, "Error opening stream to %s: %s\n", t.PodName, t.ContainerName)
+			fmt.Println(errors.Wrapf(err, "Error opening stream to %s: %s\n", t.PodName, t.ContainerName))
 		}
 
 		reader := bufio.NewReader(stream)
 
+		fmt.Println("listening to", t.PodName, t.ContainerName)
 		for {
 			line, err := reader.ReadBytes('\n')
-			if err != nil && err != io.EOF {
-				errc <- err
+			if err != nil {
+				if err == io.EOF {
+					t.Print("EOF\n")
+				}
 				return
 			}
 
@@ -70,14 +70,13 @@ func (t *Tail) Start(ctx context.Context, i corev1.PodInterface, out io.Writer) 
 		<-ctx.Done()
 		t.Close()
 	}()
-
-	return errc
 }
 
 func (t *Tail) Close() {
+	fmt.Printf("close %s %s\n", t.PodName, t.ContainerName)
 	t.closed <- true
 }
 
 func (t *Tail) Print(msg string) {
-	log.Printf("%s %s | %s", t.PodName, t.ContainerName, msg)
+	fmt.Printf("MSG %s %s | %s", t.PodName, t.ContainerName, msg)
 }
