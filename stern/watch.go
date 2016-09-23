@@ -39,7 +39,7 @@ func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp)
 				switch e.Type {
 				case watch.Added:
 					for _, c := range pod.Status.ContainerStatuses {
-						if c.Ready {
+						if c.State.Running != nil {
 							added <- &Target{
 								Pod:       pod.Name,
 								Container: c.Name,
@@ -48,7 +48,7 @@ func Watch(ctx context.Context, i corev1.PodInterface, podFilter *regexp.Regexp)
 					}
 				case watch.Modified:
 					for _, c := range pod.Status.ContainerStatuses {
-						if c.Ready {
+						if c.State.Running != nil {
 							added <- &Target{
 								Pod:       pod.Name,
 								Container: c.Name,

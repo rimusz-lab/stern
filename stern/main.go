@@ -30,15 +30,13 @@ func Run(ctx context.Context, config *Config) error {
 				continue
 			}
 
-			fmt.Printf("addded %s | %s\n", p.Pod, p.Container)
-
 			tail := NewTail(p.Pod, p.Container, &TailOptions{
 				Timestamps:   config.Timestamps,
 				SinceSeconds: config.Since,
 			})
 			tails[ID] = tail
 
-			tail.Start(ctx, input, nil)
+			tail.Start(ctx, input)
 		}
 	}()
 
@@ -48,7 +46,6 @@ func Run(ctx context.Context, config *Config) error {
 			if tails[ID] == nil {
 				continue
 			}
-			fmt.Printf("removed %s | %s\n", p.Pod, p.Container)
 			tails[ID].Close()
 			delete(tails, ID)
 		}
