@@ -42,6 +42,11 @@ func main() {
 			Usage: "container name when multiple containers in pod",
 			Value: ".*",
 		},
+		cli.StringFlag{
+			Name:  "context",
+			Usage: "kubernetes context to use",
+			Value: "",
+		},
 		cli.BoolFlag{
 			Name:  "timestamps, t",
 			Usage: "print timestamps",
@@ -59,6 +64,7 @@ func main() {
 
 type Config struct {
 	KubeConfig     string
+	ContextName    string
 	PodQuery       *regexp.Regexp
 	Timestamps     bool
 	ContainerQuery *regexp.Regexp
@@ -66,6 +72,10 @@ type Config struct {
 }
 
 var tailAction = func(c *cli.Context) error {
+	if len(c.Args()) != 1 {
+		return cli.ShowAppHelp(c)
+	}
+
 	config, err := parseConfig(c)
 	if err != nil {
 		log.Println(err)
@@ -95,10 +105,6 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		kubeConfig = path.Join(u.HomeDir, ".kube/config")
 	}
 
-	if len(c.Args()) < 1 {
-		return nil, errors.New("query missing")
-	}
-
 	pod, err := regexp.Compile(c.Args()[0])
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to compile regular expression from query")
@@ -115,13 +121,20 @@ func parseConfig(c *cli.Context) (*Config, error) {
 		ContainerQuery: container,
 		Timestamps:     c.Bool("timestamps"),
 		Since:          c.Int64("since"),
+		ContextName:    c.String("context"),
 	}, nil
 }
 
 func run(ctx context.Context, config *Config) error {
-	c, err := clientcmd.BuildConfigFromFlags("", config.KubeConfig)
+	c, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: config.KubeConfig},
+		&clientcmd.ConfigOverrides{
+			CurrentContext: config.ContextName,
+		},
+	).ClientConfig()
+
 	if err != nil {
-		return errors.Wrap(err, "failed to get kube config")
+		return errors.Wrap(err, "failed to get client config")
 	}
 
 	clientset, err := kubernetes.NewForConfig(c)
