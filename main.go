@@ -49,6 +49,7 @@ func main() {
 		cli.Int64Flag{
 			Name:  "since, s",
 			Usage: "since X seconds ago",
+			Value: 10,
 		},
 	}
 	app.Action = tailAction
